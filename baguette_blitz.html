@@ -1,0 +1,325 @@
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Baguette Blitz</title>
+        <style>
+            /* --- CSS Styles --- */
+            body {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+                background-color: #f0f0f0;
+                font-family: Arial, sans-serif;
+            }
+    
+            #gameContainer {
+                text-align: center;
+                position: relative; /* Needed for absolute positioning of score/messages */
+            }
+    
+            #gameCanvas {
+                border: 2px solid black;
+                background-color: #add8e6; /* Light blue background */
+                display: block; /* Prevent extra space below canvas */
+                margin: 0 auto; /* Center canvas if container is wider */
+            }
+    
+            #scoreDisplay {
+                position: absolute;
+                top: 40px; /* Adjust as needed */
+                left: 10px;
+                font-size: 24px;
+                font-weight: bold;
+                color: #333;
+                z-index: 5; /* Ensure score is above canvas but below game over message */
+            }
+    
+            #instructions {
+                margin-top: 10px;
+                font-size: 14px;
+                color: #555;
+            }
+    
+            #gameOverMessage {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                font-size: 48px;
+                font-weight: bold;
+                color: red;
+                background-color: rgba(255, 255, 255, 0.8); /* Semi-transparent white background */
+                padding: 20px;
+                border-radius: 10px;
+                text-align: center;
+                z-index: 10; /* Ensure it's above the canvas */
+                display: none; /* Initially hidden */
+            }
+        </style>
+    </head>
+    <body>
+        <div id="gameContainer">
+            <h1>Baguette Blitz</h1>
+            <div id="scoreDisplay">Score: 0</div>
+            <canvas id="gameCanvas" width="800" height="600"></canvas>
+            <div id="instructions">Use Left/Right Arrow Keys to Move. Avoid Red (Soldiers) & Brown (Baguettes)! Collect Coins!</div>
+            <div id="gameOverMessage">GAME OVER! Press Enter to Restart</div>
+        </div>
+    
+        <script>
+            // --- JavaScript Game Logic ---
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            const scoreDisplay = document.getElementById('scoreDisplay');
+            const gameOverMessage = document.getElementById('gameOverMessage');
+    
+            // --- Game Constants ---
+            const PLAYER_WIDTH = 40;
+            const PLAYER_HEIGHT = 50;
+            const PLAYER_SPEED = 8;
+            const HAZARD_WIDTH = 30;
+            const HAZARD_HEIGHT = 40;
+            const BAGUETTE_WIDTH = 50;
+            const BAGUETTE_HEIGHT = 15;
+            const COIN_RADIUS = 10;
+    
+            // --- Game Variables ---
+            let score = 0;
+            // CHANGED: Increased base speed
+            let baseGameSpeed = 3.5; // Initial speed (was 2)
+            let gameSpeed = baseGameSpeed;
+            let isGameOver = false;
+            let moveLeft = false;
+            let moveRight = false;
+            let frameCount = 0; // Counter for timing spawns/difficulty increase
+            let animationFrameId; // To store the requestAnimationFrame ID
+    
+            let player = {
+                x: canvas.width / 2 - PLAYER_WIDTH / 2,
+                y: canvas.height - PLAYER_HEIGHT - 10, // Positioned slightly above bottom
+                width: PLAYER_WIDTH,
+                height: PLAYER_HEIGHT,
+                color: 'blue' // Placeholder for Napoleon
+            };
+    
+            let fallingObjects = []; // Array for soldiers, baguettes, coins
+    
+            // --- Input Handling ---
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowLeft') {
+                    moveLeft = true;
+                } else if (e.key === 'ArrowRight') {
+                    moveRight = true;
+                } else if (e.key === 'Enter' && isGameOver) {
+                    restartGame();
+                }
+            });
+    
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'ArrowLeft') {
+                    moveLeft = false;
+                } else if (e.key === 'ArrowRight') {
+                    moveRight = false;
+                }
+            });
+    
+            // --- Helper Functions ---
+            function getRandomInt(min, max) {
+                return Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+    
+            function checkCollision(rect1, rect2) {
+                // AABB Collision Detection
+                return rect1.x < rect2.x + rect2.width &&
+                       rect1.x + rect1.width > rect2.x &&
+                       rect1.y < rect2.y + rect2.height &&
+                       rect1.y + rect1.height > rect2.y;
+            }
+    
+            function spawnObject() {
+                const spawnChance = Math.random();
+                let newObject = {
+                    x: 0, // Will be set after width is known
+                    y: 0, // Will be set after height is known
+                    speedModifier: Math.random() * 0.5 + 0.8 // Slight speed variation
+                };
+    
+                 if (spawnChance < 0.015) { // Lower chance for coins (Gold)
+                    newObject.type = 'coin';
+                    newObject.radius = COIN_RADIUS;
+                    newObject.width = COIN_RADIUS * 2; // For collision box
+                    newObject.height = COIN_RADIUS * 2;
+                    newObject.color = 'gold';
+                    newObject.value = 50;
+                    newObject.y = -newObject.height;
+                } else if (spawnChance < 0.030) { // Chance for Silver coin
+                     newObject.type = 'coin';
+                     newObject.radius = COIN_RADIUS * 0.8; // Slightly smaller
+                     newObject.width = newObject.radius * 2;
+                     newObject.height = newObject.radius * 2;
+                     newObject.color = 'silver';
+                     newObject.value = 25;
+                     newObject.y = -newObject.height;
+                } else if (spawnChance < 0.050) { // Chance for Bronze coin
+                     newObject.type = 'coin';
+                     newObject.radius = COIN_RADIUS * 0.6; // Smallest
+                     newObject.width = newObject.radius * 2;
+                     newObject.height = newObject.radius * 2;
+                     newObject.color = '#CD7F32'; // Bronze color
+                     newObject.value = 10;
+                     newObject.y = -newObject.height;
+                } else if (spawnChance < 0.09) { // Chance for hazards (increased total hazard chance)
+                     const hazardType = Math.random();
+                     if (hazardType < 0.5) { // Spawn Russian Soldier
+                         newObject.type = 'hazard';
+                         newObject.width = HAZARD_WIDTH;
+                         newObject.height = HAZARD_HEIGHT;
+                         newObject.color = 'red'; // Placeholder for Soldier
+                         newObject.y = -newObject.height;
+                     } else { // Spawn Baguette
+                         newObject.type = 'hazard';
+                         newObject.width = BAGUETTE_WIDTH;
+                         newObject.height = BAGUETTE_HEIGHT;
+                         newObject.color = '#A0522D'; // Sienna brown placeholder for Baguette
+                         newObject.y = -newObject.height;
+                     }
+                } else {
+                    return; // Don't spawn anything this frame if conditions not met
+                }
+    
+                 // Make sure x position is valid after setting width
+                newObject.x = getRandomInt(0, canvas.width - newObject.width);
+    
+                fallingObjects.push(newObject);
+            }
+    
+    
+            function drawPlayer() {
+                ctx.fillStyle = player.color;
+                // Later: ctx.drawImage(napoleonImage, player.x, player.y, player.width, player.height);
+                ctx.fillRect(player.x, player.y, player.width, player.height);
+            }
+    
+            function drawObjects() {
+                fallingObjects.forEach(obj => {
+                    ctx.fillStyle = obj.color;
+                    if (obj.type === 'coin') {
+                        ctx.beginPath();
+                        ctx.arc(obj.x + obj.width / 2, obj.y + obj.height / 2, obj.width / 2, 0, Math.PI * 2); // Draw circle using width/height
+                        ctx.fill();
+                        // Later: ctx.drawImage(coinImage, obj.x, obj.y, obj.width, obj.height);
+                    } else { // Hazards (Soldier/Baguette)
+                        ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+                        // Later: ctx.drawImage(hazardImage, obj.x, obj.y, obj.width, obj.height);
+                    }
+                });
+            }
+    
+            function updateScore() {
+                scoreDisplay.textContent = `Score: ${score}`;
+            }
+    
+            // CHANGED: Modified the difficulty curve to increase speed more rapidly
+            function increaseDifficulty() {
+                // Increase speed based on score, faster than before
+                // Example: increase by 0.75 every 100 points, capped at an additional 8 speed units.
+                // You can tweak the '100', '0.75', and '8' values here for different curves.
+                gameSpeed = baseGameSpeed + Math.min(Math.floor(score / 100) * 0.75, 8);
+            }
+    
+            function endGame() {
+                 isGameOver = true;
+                 gameOverMessage.style.display = 'block'; // Show game over message
+                 cancelAnimationFrame(animationFrameId); // Stop the game loop
+            }
+    
+            // --- Game Loop ---
+            function gameLoop() {
+                if (isGameOver) {
+                    return; // Stop the loop if game over flag is set
+                }
+    
+                // 1. Clear Canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+                // 2. Update Player Position
+                if (moveLeft && player.x > 0) {
+                    player.x -= PLAYER_SPEED;
+                }
+                if (moveRight && player.x < canvas.width - player.width) {
+                    player.x += PLAYER_SPEED;
+                }
+    
+                // 3. Spawn New Objects
+                frameCount++;
+                // Control spawn rate - adjust the modulo value for frequency
+                if (frameCount % 15 === 0) { // Try spawning slightly more often
+                   spawnObject();
+                }
+    
+    
+                // 4. Update & Check Objects
+                for (let i = fallingObjects.length - 1; i >= 0; i--) {
+                    let obj = fallingObjects[i];
+                    // Use the current gameSpeed to move objects
+                    obj.y += gameSpeed * obj.speedModifier; // Move object down
+    
+                    // Check for collision with player
+                    if (checkCollision(player, obj)) {
+                        if (obj.type === 'hazard') {
+                            endGame();
+                            return; // Exit loop immediately on game over collision
+                        } else if (obj.type === 'coin') {
+                            score += obj.value;
+                            updateScore();
+                            fallingObjects.splice(i, 1); // Remove collected coin
+                            // Continue loop after collecting coin
+                        }
+                    }
+                    // Remove object if it falls off screen
+                    else if (obj.y > canvas.height) {
+                        fallingObjects.splice(i, 1);
+                    }
+                }
+    
+                // 5. Draw Elements
+                 drawPlayer();
+                 drawObjects();
+    
+    
+                // 6. Increase Difficulty
+                increaseDifficulty(); // This now applies the faster scaling
+    
+                // 7. Request Next Frame
+                animationFrameId = requestAnimationFrame(gameLoop);
+            }
+    
+            // --- Game Management ---
+            function restartGame() {
+                 if (animationFrameId) {
+                     cancelAnimationFrame(animationFrameId);
+                 }
+                score = 0;
+                gameSpeed = baseGameSpeed; // Reset to the (now higher) base speed
+                isGameOver = false;
+                moveLeft = false;
+                moveRight = false;
+                player.x = canvas.width / 2 - PLAYER_WIDTH / 2; // Reset player position
+                fallingObjects = []; // Clear existing objects
+                frameCount = 0;
+                updateScore();
+                gameOverMessage.style.display = 'none'; // Hide game over message
+                gameLoop(); // Start the loop again
+            }
+    
+            // --- Initial Call ---
+            updateScore(); // Initialize score display
+            restartGame(); // Use restart game to initialize properly
+    
+        </script>
+    </body>
+</html>
